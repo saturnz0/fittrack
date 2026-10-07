@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#0B0F14">
+  <meta name="description" content="FitTrack — acompanhamento de treinos e evolução de cargas.">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icon.svg">
+  <link rel="stylesheet" href="styles.css">
+  <title>FitTrack</title>
+</head>
+<body>
+  <div id="app">
+    <header class="topbar">
+      <div>
+        <div class="eyebrow" id="todayLabel">QUARTA • 07 OUT</div>
+        <h1 id="pageTitle">Olá, Samuel 👋</h1>
+      </div>
+      <button class="icon-btn" aria-label="Notificações">♧</button>
+    </header>
+
+    <main id="screen" class="screen"></main>
+
+    <nav class="bottom-nav">
+      <button class="nav-item active" data-screen="home"><span>⌂</span><small>Início</small></button>
+      <button class="nav-item" data-screen="workouts"><span>♜</span><small>Treinos</small></button>
+      <button class="nav-item" data-screen="progress"><span>⌁</span><small>Evolução</small></button>
+      <button class="nav-item" data-screen="profile"><span>○</span><small>Perfil</small></button>
+    </nav>
+  </div>
+
+  <div id="toast" class="toast"></div>
+  <script src="app.js"></script>
+  <script>if ("serviceWorker" in navigator) navigator.serviceWorker.register("./sw.js").catch(()=>{});</script>
+</body>
+</html>
