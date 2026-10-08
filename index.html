@@ -106,13 +106,20 @@ state.v17Paused = false;
 state.v17WorkoutNote = '';
 state.v17ExerciseNote = '';
 state.v17Resume = null;
+state.freeOrder = false;
+state.completedExercises = [];
+state.freeOrderVolume = 0;
+state.freeOrderWorkout = null;
 function saveV17(){ localStorage.setItem(KEY, JSON.stringify(db)); }
 function sessionDraftSave(){
   if(!state.activeWorkout) return;
   localStorage.setItem('fittrack-v17-inprogress', JSON.stringify({
     activeWorkout:state.activeWorkout, activeExercise:state.activeExercise,
     setsDone:state.setsDone, sessionStarted:state.sessionStarted,
-    workoutNote:state.v17WorkoutNote||'', exerciseNote:state.v17ExerciseNote||''
+    workoutNote:state.v17WorkoutNote||'', exerciseNote:state.v17ExerciseNote||'',
+    completedExercises:state.completedExercises||[],
+    freeOrder:state.freeOrder===true,
+    freeOrderVolume:state.freeOrderVolume||0
   }));
 }
 function sessionDraftLoad(){
@@ -130,7 +137,7 @@ function setScreen(s){state.screen=s;stopRest(false);render()}
 function toast(m){state.toast=m;render();setTimeout(()=>{state.toast='';render()},2200)}
 function nav(){return `<div class="nav">
 <button class="${state.screen==='home'?'active':''}" onclick="setScreen('home')"><i>⌂</i>Início</button>
-<button class="${['workouts','createWorkout','library','register'].includes(state.screen)?'active':''}" onclick="setScreen('workouts')"><i>▣</i>Treinos</button>
+<button class="${['workouts','createWorkout','library','register','exercisePicker'].includes(state.screen)?'active':''}" onclick="setScreen('workouts')"><i>▣</i>Treinos</button>
 <button class="${state.screen==='progress'?'active':''}" onclick="setScreen('progress')"><i>↗</i>Evolução</button>
 <button class="${state.screen==='profile'?'active':''}" onclick="setScreen('profile')"><i>◉</i>Perfil</button></div>`}
 function shell(body,showNav=true){return `<div class="top"><div class="brand">Fit<span>Track</span></div><div class="small muted">V1.7</div></div>${body}${showNav?nav():''}`}
@@ -269,6 +276,90 @@ function smartSuggestion(id,targetReps){
  }
  return w;
 }
+function finishWorkoutEarly(){
+  if(confirm('Sair do treino? O progresso ficará salvo para você retomar depois.')){
+    stopRest(false);
+    sessionDraftSave();
+    state.setsDone=[];
+    state.v17Paused=false;
+    setScreen('workouts');
+  }
+}
+
+function exercisePicker(){
+  const w=workoutById(state.activeWorkout);
+  if(!w)return setScreen('workouts');
+  const completed=new Set(state.completedExercises||[]);
+  const remaining=w.exercises.map((c,i)=>({c,i,e:exById(c.exerciseId)})).filter(x=>x.e&&!completed.has(x.c.exerciseId));
+  const done=w.exercises.filter(c=>completed.has(c.exerciseId)).length;
+  const pct=Math.round(done/Math.max(w.exercises.length,1)*100);
+
+  return shell(`<div class="screen">
+    <div class="backline"><button class="link" onclick="finishWorkoutEarly()">‹ Sair</button><span class="muted">${esc(w.name)}</span></div>
+    <div class="eyebrow">ORDEM LIVRE</div>
+    <div class="title">Escolha o exercício</div>
+    <div class="subtitle" style="margin-bottom:14px">Você pode fazer os exercícios em qualquer ordem. A sequência do treino não será alterada.</div>
+    <div class="card" style="margin-bottom:12px">
+      <div class="row between"><b>Progresso</b><b class="green">${done}/${w.exercises.length}</b></div>
+      <div class="progress" style="margin-top:9px"><div style="width:${pct}%"></div></div>
+    </div>
+    ${remaining.map(x=>`<button class="card exercisePick" style="width:100%;text-align:left;margin-bottom:9px;cursor:pointer" onclick="chooseFreeExercise(${x.i})">
+      <div class="row between"><div class="grow"><div class="exname">${esc(x.e.name)}</div><div class="tag">${esc(x.e.muscle)} · ${x.c.sets} séries × ${x.c.reps} reps</div></div><span class="green" style="font-size:24px">›</span></div>
+    </button>`).join('')}
+    ${done===w.exercises.length?`<div class="card"><div class="eyebrow">TREINO CONCLUÍDO</div><h3>Todos os exercícios foram realizados 🎉</h3><button class="btn" style="width:100%;margin-top:10px" onclick="finishFreeOrderWorkout()">FINALIZAR TREINO</button></div>`:''}
+    <div class="row" style="gap:8px;margin-top:12px">
+      <button class="btn secondary grow" onclick="pauseWorkout()">Pausar treino</button>
+      <button class="btn secondary grow" onclick="finishWorkoutEarly()">Sair</button>
+    </div>
+  </div>`+nav());
+}
+
+function chooseFreeExercise(index){
+  const w=workoutById(state.activeWorkout);
+  if(!w||!w.exercises[index])return;
+  const c=w.exercises[index];
+  if((state.completedExercises||[]).includes(c.exerciseId)){toast('Esse exercício já foi concluído');return}
+  state.activeExercise=index;
+  state.setsDone=[];
+  state.v17ExerciseNote='';
+  state.v17Paused=false;
+  sessionDraftSave();
+  setScreen('register');
+}
+
+function backToExercisePicker(){
+  stopRest(false);
+  state.setsDone=[];
+  state.v17Paused=false;
+  sessionDraftSave();
+  setScreen('exercisePicker');
+}
+
+function finishFreeOrderWorkout(){
+  const w=workoutById(state.activeWorkout);
+  if(!w)return;
+  if((state.completedExercises||[]).length<w.exercises.length){
+    setScreen('exercisePicker');
+    toast('Conclua todos os exercícios antes de finalizar');
+    return;
+  }
+  db.sessions.push({id:uid('s'),date:new Date().toISOString(),workoutId:w.id,volume:state.freeOrderVolume||0,duration:Date.now()-(state.sessionStarted||Date.now()),note:state.v17WorkoutNote||''});
+  db.sessions=db.sessions.slice(-300);
+  updateAchievements();
+  save();
+  sessionDraftClear();
+  stopRest(false);
+  state.v17Paused=false;
+  state.freeOrder=false;
+  state.freeOrderWorkout=null;
+  state.completedExercises=[];
+  state.freeOrderVolume=0;
+  state.setsDone=[];
+  state.activeExercise=0;
+  toast('Treino concluído!');
+  setTimeout(()=>setScreen('workouts'),500);
+}
+
 function register(){
  const w=workoutById(state.activeWorkout),c=w.exercises[state.activeExercise],e=exById(c.exerciseId),h=getHistory(e.id),suggest=smartSuggestion(e.id,c.reps);
  if(!state.setsDone.length)state.setsDone=Array.from({length:c.sets},()=>({weight:h.lastWeight||suggest,reps:c.reps,done:false}));
@@ -295,9 +386,36 @@ function nextExercise(){
    updateAchievements();save();stopRest(false);toast('Treino concluído!');setTimeout(()=>setScreen('workouts'),700)
  }else{save();state.activeExercise++;state.setsDone=[];render()}
 }
-function startRest(sec){stopRest(false);state.restLeft=sec;state.restTimer=setInterval(()=>{state.restLeft--;if(state.restLeft<=0){stopRest(true)}else render()},1000);render()}
-function stopRest(finished){if(state.restTimer){clearInterval(state.restTimer);state.restTimer=null}if(finished&&state.screen==='register')toast('Descanso concluído')}
-function restOverlay(){if(!state.restLeft)return'';return `<div class="modalWrap"><div class="modal"><div class="eyebrow">DESCANSO</div><div class="timer">${String(Math.floor(state.restLeft/60)).padStart(2,'0')}:${String(state.restLeft%60).padStart(2,'0')}</div><button class="btn" style="width:100%;margin-bottom:8px" onclick="stopRest(true);render()">PULAR DESCANSO</button><button class="btn secondary" style="width:100%" onclick="startRest(state.restLeft+30)">+30 SEGUNDOS</button></div></div>`}
+function startRest(sec){
+  stopRest(false);
+  state.restLeft=Math.max(0,Number(sec)||0);
+  if(!state.restLeft){render();return}
+  state.restTimer=setInterval(()=>{
+    state.restLeft=Math.max(0,state.restLeft-1);
+    const timerEl=document.getElementById('restTimerValue');
+    if(timerEl) timerEl.textContent=`${String(Math.floor(state.restLeft/60)).padStart(2,'0')}:${String(state.restLeft%60).padStart(2,'0')}`;
+    if(state.restLeft<=0) stopRest(true);
+  },1000);
+  render();
+}
+function stopRest(finished){
+  if(state.restTimer){clearInterval(state.restTimer);state.restTimer=null}
+  const hadRest=state.restLeft>0;
+  state.restLeft=0;
+  if(finished && hadRest && state.screen==='register') toast('Descanso concluído');
+}
+function skipRest(){
+  if(state.restTimer){clearInterval(state.restTimer);state.restTimer=null}
+  state.restLeft=0;
+  const overlay=document.getElementById('overlay');
+  if(overlay) overlay.innerHTML='';
+  render();
+}
+function addRestTime(){startRest((Number(state.restLeft)||0)+30)}
+function restOverlay(){
+  if(!state.restLeft)return '';
+  return `<div class="modalWrap"><div class="modal"><div class="eyebrow">DESCANSO</div><div class="timer" id="restTimerValue">${String(Math.floor(state.restLeft/60)).padStart(2,'0')}:${String(state.restLeft%60).padStart(2,'0')}</div><button class="btn" style="width:100%;margin-bottom:8px" onclick="skipRest()">PULAR DESCANSO</button><button class="btn secondary" style="width:100%" onclick="addRestTime()">+30 SEGUNDOS</button></div></div>`;
+}
 
 function recentSessions(days=30){const cut=Date.now()-days*86400000;return db.sessions.filter(s=>new Date(s.date).getTime()>=cut)}
 function progress(){
@@ -373,17 +491,38 @@ function startWorkout(id){
   const w=workoutById(id);
   if(!w||!w.exercises.length){toast('Adicione exercícios ao treino primeiro');return}
   const old=sessionDraftLoad();
+
   if(old && old.activeWorkout===id && confirm('Existe um treino em andamento. Retomar de onde parou?')){
-    state.activeWorkout=old.activeWorkout; state.activeExercise=old.activeExercise||0;
-    state.setsDone=old.setsDone||[]; state.sessionStarted=old.sessionStarted||Date.now();
-    state.v17WorkoutNote=old.workoutNote||''; state.v17ExerciseNote=old.exerciseNote||'';
-  }else{
-    if(old && !confirm('Há outro treino em andamento. Começar um novo e descartar o anterior?')) return;
-    sessionDraftClear();
-    state.activeWorkout=id;state.activeExercise=0;state.setsDone=[];state.sessionStarted=Date.now();
-    state.v17WorkoutNote='';state.v17ExerciseNote='';
+    state.activeWorkout=old.activeWorkout;
+    state.activeExercise=old.activeExercise||0;
+    state.setsDone=old.setsDone||[];
+    state.sessionStarted=old.sessionStarted||Date.now();
+    state.v17WorkoutNote=old.workoutNote||'';
+    state.v17ExerciseNote=old.exerciseNote||'';
+    state.completedExercises=old.completedExercises||[];
+    state.freeOrder=old.freeOrder!==false;
+    state.freeOrderVolume=old.freeOrderVolume||0;
+    state.freeOrderWorkout=id;
+    state.v17Paused=false;
+    setScreen(state.freeOrder?'exercisePicker':'register');
+    return;
   }
-  state.v17Paused=false; setScreen('register');
+
+  if(old && !confirm('Há outro treino em andamento. Começar um novo e descartar o anterior?')) return;
+
+  sessionDraftClear();
+  state.activeWorkout=id;
+  state.activeExercise=0;
+  state.setsDone=[];
+  state.sessionStarted=Date.now();
+  state.v17WorkoutNote='';
+  state.v17ExerciseNote='';
+  state.completedExercises=[];
+  state.freeOrder=true;
+  state.freeOrderVolume=0;
+  state.freeOrderWorkout=id;
+  state.v17Paused=false;
+  setScreen('exercisePicker');
 }
 function finishWorkoutEarly(){
   if(!confirm('Sair do treino? O progresso das séries concluídas ficará salvo para retomada.')) return;
@@ -392,6 +531,7 @@ function finishWorkoutEarly(){
 function pauseWorkout(){
   state.v17Paused=!state.v17Paused;
   if(state.v17Paused) stopRest(false);
+  sessionDraftSave();
   render();
 }
 function skipExercise(){
@@ -419,21 +559,53 @@ function completeSet(i){
   startRest(w.exercises[state.activeExercise].rest);
 }
 function nextExercise(){
-  const w=workoutById(state.activeWorkout),c=w.exercises[state.activeExercise],e=exById(c.exerciseId);
+  const w=workoutById(state.activeWorkout);
+  if(!w)return;
+  const c=w.exercises[state.activeExercise],e=exById(c.exerciseId);
   const completed=state.setsDone.filter(s=>s.done);
   if(!completed.length){toast('Conclua pelo menos uma série');return}
+
   const vol=completed.reduce((a,s)=>a+s.weight*s.reps,0);
   const max=Math.max(...completed.map(s=>s.weight));
-  const h=getHistory(e.id);h.lastWeight=max;h.lastReps=completed[completed.length-1].reps;h.pr=Math.max(h.pr||0,max);
-  h.sessions=h.sessions||[];h.sessions.push({date:new Date().toISOString(),weight:max,reps:h.lastReps,volume:vol,note:state.v17ExerciseNote||''});
-  h.sessions=h.sessions.slice(-30);db.history[e.id]=h;
+  const h=getHistory(e.id);
+  h.lastWeight=max;
+  h.lastReps=completed[completed.length-1].reps;
+  h.pr=Math.max(h.pr||0,max);
+  h.sessions=h.sessions||[];
+  h.sessions.push({date:new Date().toISOString(),weight:max,reps:h.lastReps,volume:vol,note:state.v17ExerciseNote||''});
+  h.sessions=h.sessions.slice(-30);
+  db.history[e.id]=h;
+
+  if(state.freeOrder){
+    state.completedExercises=state.completedExercises||[];
+    if(!state.completedExercises.includes(c.exerciseId)) state.completedExercises.push(c.exerciseId);
+    state.freeOrderVolume=(state.freeOrderVolume||0)+vol;
+    state.setsDone=[];
+    state.v17ExerciseNote='';
+    save();
+    sessionDraftSave();
+    setScreen('exercisePicker');
+    toast(state.completedExercises.length===w.exercises.length?'Todos os exercícios foram concluídos!':'Exercício concluído');
+    return;
+  }
+
   if(state.activeExercise===w.exercises.length-1){
     db.sessions.push({id:uid('s'),date:new Date().toISOString(),workoutId:w.id,volume:vol,duration:Date.now()-state.sessionStarted,note:state.v17WorkoutNote||''});
     db.sessions=db.sessions.slice(-300);
-    updateAchievements(); save(); sessionDraftClear(); stopRest(false); state.v17Paused=false;
-    toast('Treino concluído!'); setTimeout(()=>setScreen('workouts'),700);
+    updateAchievements();
+    save();
+    sessionDraftClear();
+    stopRest(false);
+    state.v17Paused=false;
+    toast('Treino concluído!');
+    setTimeout(()=>setScreen('workouts'),700);
   }else{
-    state.activeExercise++;state.setsDone=[];state.v17ExerciseNote='';save();sessionDraftSave();render();
+    state.activeExercise++;
+    state.setsDone=[];
+    state.v17ExerciseNote='';
+    save();
+    sessionDraftSave();
+    render();
   }
 }
 function finishWorkout(){const w=workoutById(state.activeWorkout);if(!w)return;while(state.activeExercise<w.exercises.length-1){nextExercise();return}nextExercise()}
@@ -448,7 +620,7 @@ function register(){
    <div class="card resumeCard"><div class="eyebrow">TREINO PAUSADO</div><h2>Pronto para continuar?</h2><div class="subtitle">Seu progresso foi salvo. Tempo ativo: ${elapsed} min.</div><button class="btn" style="width:100%;margin-top:14px" onclick="pauseWorkout()">CONTINUAR TREINO</button></div></div>`+nav());
  }
  return shell(`<div class="screen">
- <div class="backline"><button class="link" onclick="finishWorkoutEarly()">‹ Sair</button><span class="muted">${esc(w.name)}</span><button class="link" onclick="pauseWorkout()">Pausar</button></div>
+ <div class="backline"><button class="link" onclick="backToExercisePicker()">‹ Exercícios</button><span class="muted">${esc(w.name)}</span><button class="link" onclick="pauseWorkout()">Pausar</button></div>
  <div class="v17WorkoutHero"><div class="eyebrow">EXERCÍCIO ${state.activeExercise+1} DE ${w.exercises.length}</div>
  <div class="v17SetCurrent">${esc(e.name)}</div><div class="subtitle">${e.muscle} · ${e.equipment} · ${done}/${state.setsDone.length} séries</div>
  <div class="v17Actions"><div class="v17Mini"><div class="eyebrow">SUGESTÃO</div><b class="green">${suggest} ${e.unit}</b><div class="small muted">${c.reps} reps</div></div><div class="v17Mini"><div class="eyebrow">ÚLTIMO</div><b>${h.lastWeight||0} ${e.unit}</b><div class="small muted">× ${h.lastReps||'-'}</div></div></div>
@@ -580,6 +752,7 @@ function render(){
  else if(state.screen==='library')content=library();
  else if(state.screen==='createWorkout')content=createWorkout();
  else if(state.screen==='exerciseForm')content=exerciseForm();
+ else if(state.screen==='exercisePicker')content=exercisePicker();
  else if(state.screen==='register')content=register();
  else if(state.screen==='progress')content=progress();
  else if(state.screen==='profile')content=profile();
