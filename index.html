@@ -301,9 +301,50 @@ function nextExercise(){
    updateAchievements();save();stopRest(false);toast('Treino concluído!');setTimeout(()=>setScreen('workouts'),700)
  }else{save();state.activeExercise++;state.setsDone=[];render()}
 }
-function startRest(sec){stopRest(false);state.restLeft=sec;state.restTimer=setInterval(()=>{state.restLeft--;if(state.restLeft<=0){stopRest(true)}else render()},1000);render()}
-function stopRest(finished){if(state.restTimer){clearInterval(state.restTimer);state.restTimer=null}if(finished&&state.screen==='register')toast('Descanso concluído')}
-function restOverlay(){if(!state.restLeft)return'';return `<div class="modalWrap"><div class="modal"><div class="eyebrow">DESCANSO</div><div class="timer">${String(Math.floor(state.restLeft/60)).padStart(2,'0')}:${String(state.restLeft%60).padStart(2,'0')}</div><button class="btn" style="width:100%;margin-bottom:8px" onclick="stopRest(true);render()">PULAR DESCANSO</button><button class="btn secondary" style="width:100%" onclick="startRest(state.restLeft+30)">+30 SEGUNDOS</button></div></div>`}
+/* ===== Correção do descanso V1.7 ===== */
+function startRest(sec){
+  if(state.restTimer){clearInterval(state.restTimer);state.restTimer=null}
+  state.restLeft=Math.max(0,Number(sec)||0);
+  if(!state.restLeft){render();return}
+  state.restTimer=setInterval(()=>{
+    state.restLeft=Math.max(0,state.restLeft-1);
+    if(state.restLeft<=0){
+      clearInterval(state.restTimer);
+      state.restTimer=null;
+      state.restLeft=0;
+      try{if(navigator.vibrate)navigator.vibrate([150,80,150])}catch(e){}
+      toast('Descanso concluído');
+      render();
+      return;
+    }
+    const timer=document.getElementById('restTimerValue');
+    if(timer)timer.textContent=String(Math.floor(state.restLeft/60)).padStart(2,'0')+':'+String(state.restLeft%60).padStart(2,'0');
+  },1000);
+  render();
+}
+function stopRest(showToast=false){
+  if(state.restTimer){clearInterval(state.restTimer);state.restTimer=null}
+  state.restLeft=0;
+  if(showToast)toast('Descanso pulado');
+}
+function restOverlay(){
+  if(!state.restLeft)return'';
+  const mm=String(Math.floor(state.restLeft/60)).padStart(2,'0');
+  const ss=String(state.restLeft%60).padStart(2,'0');
+  return `<div class="modalWrap"><div class="modal"><div class="eyebrow">DESCANSO</div><div class="timer" id="restTimerValue">${mm}:${ss}</div><button class="btn" style="width:100%;margin-bottom:8px" onclick="skipRest()">PULAR DESCANSO</button><button class="btn secondary" style="width:100%" onclick="addRestTime()">+30 SEGUNDOS</button></div></div>`;
+}
+function skipRest(){
+  stopRest(false);
+  render();
+  toast('Descanso pulado');
+}
+function addRestTime(){
+  const current=Math.max(0,state.restLeft||0);
+  if(current<=0){startRest(30);return}
+  state.restLeft=current+30;
+  const timer=document.getElementById('restTimerValue');
+  if(timer)timer.textContent=String(Math.floor(state.restLeft/60)).padStart(2,'0')+':'+String(state.restLeft%60).padStart(2,'0');
+}
 
 function recentSessions(days=30){const cut=Date.now()-days*86400000;return db.sessions.filter(s=>new Date(s.date).getTime()>=cut)}
 function progress(){
