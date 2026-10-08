@@ -51,6 +51,12 @@
 .planned{outline:1px dashed rgba(184,243,74,.35)}
 .resumeCard{border:1px solid rgba(184,243,74,.3);background:rgba(184,243,74,.06)}
 
+
+.pwaInstallCard{border:1px solid rgba(184,243,74,.25);background:linear-gradient(145deg,rgba(184,243,74,.08),rgba(184,243,74,.02));}
+.pwaInstallBtn{display:none;width:100%;margin-top:12px;}
+.pwaInstallBtn.show{display:block;}
+.pwaInstalled{color:var(--green);font-size:12px;margin-top:8px;display:none;}
+
 </style>
 <body>
 <div class="app" id="app"></div>
@@ -357,7 +363,21 @@ function profile(){
  return shell(`<div class="screen"><div class="eyebrow">Configurações</div><div class="title">Perfil</div>
  <div class="card"><h3>FitTrack</h3><div class="subtitle">Seus dados ficam neste aparelho. Faça backups periódicos para não perder seu histórico.</div></div>
  <div class="sectionTitle"><h3>Biblioteca</h3></div><div class="card row between"><div><b>${db.exercises.length} exercícios</b><div class="small muted">${db.exercises.filter(e=>e.isCustom).length} personalizados · ${db.favorites.length} favoritos</div></div><button class="btn secondary" onclick="openLibraryFromProfile()">Abrir</button></div>
- <div class="sectionTitle"><h3>Dados</h3></div><div class="card"><button class="btn secondary" style="width:100%;margin-bottom:9px" onclick="exportBackup()">↓ Exportar backup</button><button class="btn secondary" style="width:100%;margin-bottom:9px" onclick="importBackup()">↑ Importar backup</button><button class="btn danger" style="width:100%" onclick="clearData()">Limpar dados locais</button></div>
+ 
+<div class="sectionTitle"><h3>Aplicativo</h3></div>
+<div class="card pwaInstallCard">
+  <div class="row between">
+    <div>
+      <b>Instalar FitTrack</b>
+      <div class="small muted" style="margin-top:4px">Tenha o FitTrack na tela inicial e abra como aplicativo.</div>
+    </div>
+    <span style="font-size:24px">📱</span>
+  </div>
+  <button id="pwaInstallBtn" class="btn pwaInstallBtn" onclick="installFitTrack()">INSTALAR FITTRACK</button>
+  <div id="pwaInstallStatus" class="pwaInstalled">✓ FitTrack instalado neste dispositivo</div>
+</div>
+
+<div class="sectionTitle"><h3>Dados</h3></div><div class="card"><button class="btn secondary" style="width:100%;margin-bottom:9px" onclick="exportBackup()">↓ Exportar backup</button><button class="btn secondary" style="width:100%;margin-bottom:9px" onclick="importBackup()">↑ Importar backup</button><button class="btn danger" style="width:100%" onclick="clearData()">Limpar dados locais</button></div>
  <div class="sectionTitle"><h3>Preferências</h3></div><div class="card"><label class="formlabel">DESCANSO PADRÃO</label><select class="select" onchange="db.settings.restDefault=+this.value;save();toast('Preferência salva')">${[30,60,90,120,180].map(x=>`<option ${db.settings.restDefault==x?'selected':''}>${x}</option>`).join('')}</select></div>
  </div>`+nav());
 }
@@ -567,6 +587,62 @@ function profile(){
 }
 function openLibraryFromProfile(){state.workoutDraft={id:'temp',name:'Biblioteca',description:'',days:[],exercises:[]};state.libraryReturn='profile';state.selected=[];setScreen('library')}
 
+
+/* ===== FitTrack PWA Installation ===== */
+let fittrackInstallPrompt = null;
+
+function updateInstallUI(){
+  const btn=document.getElementById('pwaInstallBtn');
+  const status=document.getElementById('pwaInstallStatus');
+  if(!btn || !status) return;
+  const standalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
+  if(standalone){
+    btn.classList.remove('show');
+    status.style.display='block';
+    status.textContent='✓ FitTrack instalado neste dispositivo';
+  }else if(fittrackInstallPrompt){
+    btn.classList.add('show');
+    status.style.display='none';
+  }else{
+    btn.classList.remove('show');
+    status.style.display='none';
+  }
+}
+
+async function installFitTrack(){
+  if(!fittrackInstallPrompt){
+    toast('No Chrome, abra o menu ⋮ e procure por “Instalar aplicativo” ou “Adicionar à tela inicial”.');
+    return;
+  }
+  try{
+    fittrackInstallPrompt.prompt();
+    const result=await fittrackInstallPrompt.userChoice;
+    if(result.outcome==='accepted') toast('FitTrack instalado!');
+  }catch(e){}
+  fittrackInstallPrompt=null;
+  updateInstallUI();
+}
+
+window.addEventListener('beforeinstallprompt',(event)=>{
+  event.preventDefault();
+  fittrackInstallPrompt=event;
+  updateInstallUI();
+});
+
+window.addEventListener('appinstalled',()=>{
+  fittrackInstallPrompt=null;
+  updateInstallUI();
+  toast('FitTrack instalado com sucesso!');
+});
+
+if('serviceWorker' in navigator){
+  window.addEventListener('load',()=>{
+    navigator.serviceWorker.register('./sw.js')
+      .then(()=>console.log('FitTrack Service Worker ativo'))
+      .catch(err=>console.warn('Service Worker:',err));
+  });
+}
+
 function bind(){
  const s=document.getElementById('libSearch');if(s){s.oninput=e=>{state.libQuery=e.target.value;render();const n=document.getElementById('libSearch');n?.focus();n?.setSelectionRange(n.value.length,n.value.length)};document.getElementById('clearSearch')?.addEventListener('click',()=>{state.libQuery='';render()})}
  document.querySelectorAll('[data-day]').forEach(b=>b.onclick=()=>{const x=b.dataset.day,i=state.workoutDraft.days.indexOf(x);i>=0?state.workoutDraft.days.splice(i,1):state.workoutDraft.days.push(x);render()})
@@ -588,6 +664,7 @@ function render(){
  bind();
 }
 render();
+setTimeout(updateInstallUI,300);
 if(sessionDraftLoad()){setTimeout(()=>{if(state.screen==='home')toast('Há um treino salvo para continuar em Treinos');},500)}
 </script>
 
